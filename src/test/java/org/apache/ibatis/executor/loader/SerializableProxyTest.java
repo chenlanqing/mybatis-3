@@ -27,6 +27,7 @@ import java.io.ObjectStreamException;
 import java.io.Serializable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+
 import org.apache.ibatis.domain.blog.Author;
 import org.apache.ibatis.domain.blog.Section;
 import org.apache.ibatis.executor.ExecutorException;
@@ -39,7 +40,7 @@ public abstract class SerializableProxyTest {
 
   protected Author author = new Author(999, "someone", "!@#@!#!@#", "someone@somewhere.com", "blah", Section.NEWS);
 
-  ProxyFactory proxyFactory;
+  static ProxyFactory proxyFactory;
 
   @Test
   void shouldKeepGenericTypes() {
