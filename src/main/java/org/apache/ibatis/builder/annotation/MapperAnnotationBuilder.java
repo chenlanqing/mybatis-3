@@ -1,5 +1,5 @@
 /**
- *    Copyright 2009-2019 the original author or authors.
+ *    Copyright 2009-2020 the original author or authors.
  *
  *    Licensed under the Apache License, Version 2.0 (the "License");
  *    you may not use this file except in compliance with the License.
@@ -130,19 +130,26 @@ public class MapperAnnotationBuilder {
       assistant.setCurrentNamespace(type.getName());
       parseCache();
       parseCacheRef();
-      Method[] methods = type.getMethods();
-      for (Method method : methods) {
+      for (Method method : type.getMethods()) {
+        if (!canHaveStatement(method)) {
+          continue;
+        }
+        if (getSqlCommandType(method) == SqlCommandType.SELECT && method.getAnnotation(ResultMap.class) == null) {
+          parseResultMap(method);
+        }
         try {
-          // issue #237
-          if (!method.isBridge()) {
-            parseStatement(method);
-          }
+          parseStatement(method);
         } catch (IncompleteElementException e) {
           configuration.addIncompleteMethod(new MethodResolver(this, method));
         }
       }
     }
     parsePendingMethods();
+  }
+
+  private boolean canHaveStatement(Method method) {
+    // issue #237
+    return !method.isBridge() && !method.isDefault();
   }
 
   private void parsePendingMethods() {
@@ -347,11 +354,13 @@ public class MapperAnnotationBuilder {
       }
 
       String resultMapId = null;
-      ResultMap resultMapAnnotation = method.getAnnotation(ResultMap.class);
-      if (resultMapAnnotation != null) {
-        resultMapId = String.join(",", resultMapAnnotation.value());
-      } else if (isSelect) {
-        resultMapId = parseResultMap(method);
+      if (isSelect) {
+        ResultMap resultMapAnnotation = method.getAnnotation(ResultMap.class);
+        if (resultMapAnnotation != null) {
+          resultMapId = String.join(",", resultMapAnnotation.value());
+        } else {
+          resultMapId = generateResultMapName(method);
+        }
       }
 
       assistant.addMappedStatement(
@@ -486,12 +495,7 @@ public class MapperAnnotationBuilder {
   }
 
   private SqlSource buildSqlSourceFromStrings(String[] strings, Class<?> parameterTypeClass, LanguageDriver languageDriver) {
-    final StringBuilder sql = new StringBuilder();
-    for (String fragment : strings) {
-      sql.append(fragment);
-      sql.append(" ");
-    }
-    return languageDriver.createSqlSource(configuration, sql.toString().trim(), parameterTypeClass);
+    return languageDriver.createSqlSource(configuration, String.join(" ", strings).trim(), parameterTypeClass);
   }
 
   private SqlCommandType getSqlCommandType(Method method) {
@@ -545,6 +549,7 @@ public class MapperAnnotationBuilder {
       @SuppressWarnings("unchecked")
       Class<? extends TypeHandler<?>> typeHandler = (Class<? extends TypeHandler<?>>)
               ((result.typeHandler() == UnknownTypeHandler.class) ? null : result.typeHandler());
+      boolean hasNestedResultMap = hasNestedResultMap(result);
       ResultMapping resultMapping = assistant.buildResultMapping(
           resultType,
           nullOrEmpty(result.property()),
@@ -552,9 +557,9 @@ public class MapperAnnotationBuilder {
           result.javaType() == void.class ? null : result.javaType(),
           result.jdbcType() == JdbcType.UNDEFINED ? null : result.jdbcType(),
           hasNestedSelect(result) ? nestedSelectId(result) : null,
-          hasNestedResultMap(result) ? nestedResultMapId(result) : null,
+          hasNestedResultMap ? nestedResultMapId(result) : null,
           null,
-          null,
+          hasNestedResultMap ? findColumnPrefix(result) : null,
           typeHandler,
           flags,
           null,
@@ -562,6 +567,14 @@ public class MapperAnnotationBuilder {
           isLazy(result));
       resultMappings.add(resultMapping);
     }
+  }
+
+  private String findColumnPrefix(Result result) {
+    String columnPrefix = result.one().columnPrefix();
+    if (columnPrefix.length() < 1) {
+      columnPrefix = result.many().columnPrefix();
+    }
+    return columnPrefix;
   }
 
   private String nestedResultMapId(Result result) {
